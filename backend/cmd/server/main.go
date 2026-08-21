@@ -97,7 +97,7 @@ func main() {
 	handler.RegisterProjectRoutes(projectAPI, svc)
 	handler.RegisterCanvasShareRoutes(api, svc)
 
-	log.Printf("影策 backend listening on %s", addr)
+	log.Printf("祥子绘境 backend listening on %s", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
 	}
