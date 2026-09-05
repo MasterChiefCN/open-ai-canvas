@@ -51,6 +51,13 @@ func TestTaskClientContextRequiresCreatePageMetadata(t *testing.T) {
 	}
 }
 
+func TestTaskClientContextPreservesCanvasNodeID(t *testing.T) {
+	context := taskClientContext(`{"mode":"image","metadata":{"nodeId":"canvas-node-1","source":"canvas"}}`)
+	if context == nil || context.NodeID != "canvas-node-1" {
+		t.Fatalf("canvas node context was not preserved: %+v", context)
+	}
+}
+
 func TestTaskClientContextProjectsChapterOperations(t *testing.T) {
 	characters := taskClientContext(`{"metadata":{"domainProjectId":"project-1","chapterId":"chapter-1","operation":"chapter_character_breakdown"}}`)
 	if characters == nil || characters.DomainProjectID != "project-1" || characters.ChapterID != "chapter-1" || characters.ChapterOperation != "characters" {

@@ -354,6 +354,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         requirements={resolvedRequirements}
                         onMissingConfig={() => navigateToSettings({ continueCreation: true })}
                         showSelectedPrice={false}
+                        showOptionPrices={creditsEnabled}
                         variant="creation"
                         showConfiguredModelName
                     />
