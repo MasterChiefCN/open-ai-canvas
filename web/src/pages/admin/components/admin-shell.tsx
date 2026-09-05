@@ -164,7 +164,13 @@ export function AdminShell() {
                 </Tooltip>
                 <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
                     <MobileAdminNavigation />
-                    <Suspense fallback={<div className="p-8 text-sm text-foreground/60" role="status">正在加载管理页面…</div>}>
+                    <Suspense
+                        fallback={
+                            <div className="p-8 text-sm text-foreground/60" role="status">
+                                正在加载管理页面…
+                            </div>
+                        }
+                    >
                         <Outlet />
                     </Suspense>
                 </section>

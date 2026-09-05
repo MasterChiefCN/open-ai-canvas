@@ -58,7 +58,7 @@ describe("canvas screen-space background", () => {
                 setProperty: (name: string, value: string) => properties.set(name, value),
             },
             dataset: { canvasViewportInteracting: "true" },
-            querySelector: (selector: string) => selector === "[data-canvas-world-layer]" ? world : grid,
+            querySelector: (selector: string) => (selector === "[data-canvas-world-layer]" ? world : grid),
         });
         const graphics: ViewportTransform[] = [];
         const previews: ViewportTransform[] = [];

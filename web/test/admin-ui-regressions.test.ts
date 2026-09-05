@@ -66,7 +66,7 @@ test("model editor presents protocols in a searchable inline radio browser inste
         Bun.file(new URL("../src/pages/admin/components/channel-model-editor.tsx", import.meta.url)).text(),
         Bun.file(new URL("../src/styles/admin-ui.css", import.meta.url)).text(),
     ]);
-    const protocolSection = sourceSection(source, '<Form.Item\n                                                className="admin-model-protocol-field"', "{protocolError && (");
+    const protocolSection = sourceSection(compactSource(source), '<Form.Item className="admin-model-protocol-field"', "{protocolError && (");
 
     expect(protocolSection).toContain("<ModelProtocolBrowser");
     expect(protocolSection).not.toContain("<Select");

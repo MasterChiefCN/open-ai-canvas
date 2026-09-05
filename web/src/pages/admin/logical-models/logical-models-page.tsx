@@ -378,8 +378,12 @@ export default function LogicalModelsPage() {
                             模型启用 <span className="text-xs text-foreground/50">保存后生效</span>
                         </label>
                         <div className="model-editor-footer-actions">
-                            <Button disabled={saving} onClick={closeEditor}>取消</Button>
-                            <Button type="primary" loading={saving} onClick={() => void saveModel()}>{editingModel ? "保存修改" : "添加模型"}</Button>
+                            <Button disabled={saving} onClick={closeEditor}>
+                                取消
+                            </Button>
+                            <Button type="primary" loading={saving} onClick={() => void saveModel()}>
+                                {editingModel ? "保存修改" : "添加模型"}
+                            </Button>
                         </div>
                     </div>
                 }
@@ -387,63 +391,81 @@ export default function LogicalModelsPage() {
                     {
                         key: "identity",
                         label: "基本信息",
-                        children: <>
-                            {editingModel?.configurationError || editingModel?.availabilityError ? (
-                                <Alert
-                                    className="mb-4"
-                                    type="warning"
-                                    showIcon
-                                    message={editingModel.configurationError ? "当前供应线路无法覆盖全部创作端能力" : "当前供应线路暂不可结算"}
-                                    description={editingModel.configurationError || editingModel.availabilityError}
-                                />
-                            ) : null}
-                            <EditorSection icon={<Layers3 className="size-4" />} title="前台展示">
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    <Form.Item name="name" label="显示名称" rules={[{ required: true, message: "请填写显示名称" }]}>
-                                        <Input placeholder="例如：Seedance 视频" />
+                        children: (
+                            <>
+                                {editingModel?.configurationError || editingModel?.availabilityError ? (
+                                    <Alert
+                                        className="mb-4"
+                                        type="warning"
+                                        showIcon
+                                        message={editingModel.configurationError ? "当前供应线路无法覆盖全部创作端能力" : "当前供应线路暂不可结算"}
+                                        description={editingModel.configurationError || editingModel.availabilityError}
+                                    />
+                                ) : null}
+                                <EditorSection icon={<Layers3 className="size-4" />} title="前台展示">
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <Form.Item name="name" label="显示名称" rules={[{ required: true, message: "请填写显示名称" }]}>
+                                            <Input placeholder="例如：Seedance 视频" />
+                                        </Form.Item>
+                                        <Form.Item name="code" label="模型代码" rules={[{ required: true, message: "请填写模型代码" }]}>
+                                            <Input placeholder="例如：seedance-video" />
+                                        </Form.Item>
+                                        <Form.Item name="icon" label="模型 Logo">
+                                            <ModelIconPicker />
+                                        </Form.Item>
+                                    </div>
+                                    <Form.Item name="description" label="简短说明">
+                                        <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="说明适合的创作场景，不描述供应渠道。" />
                                     </Form.Item>
-                                    <Form.Item name="code" label="模型代码" rules={[{ required: true, message: "请填写模型代码" }]}>
-                                        <Input placeholder="例如：seedance-video" />
+                                    <Form.Item name="capability" label="类型">
+                                        <Segmented
+                                            block
+                                            options={[
+                                                { label: "文本", value: "text" },
+                                                { label: "图片", value: "image" },
+                                                { label: "视频", value: "video" },
+                                                { label: "音频", value: "audio" },
+                                            ]}
+                                        />
                                     </Form.Item>
-                                    <Form.Item name="icon" label="模型 Logo"><ModelIconPicker /></Form.Item>
-                                </div>
-                                <Form.Item name="description" label="简短说明">
-                                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="说明适合的创作场景，不描述供应渠道。" />
-                                </Form.Item>
-                                <Form.Item name="capability" label="类型">
-                                    <Segmented block options={[{ label: "文本", value: "text" }, { label: "图片", value: "image" }, { label: "视频", value: "video" }, { label: "音频", value: "audio" }]} />
-                                </Form.Item>
-                                <Form.Item name="sortOrder" label="前台排序">
-                                    <InputNumber className="w-full" precision={0} />
-                                </Form.Item>
-                            </EditorSection>
-                        </>,
+                                    <Form.Item name="sortOrder" label="前台排序">
+                                        <InputNumber className="w-full" precision={0} />
+                                    </Form.Item>
+                                </EditorSection>
+                            </>
+                        ),
                     },
                     {
                         key: "routes",
                         label: "供应线路",
-                        children: <>
-                            <EditorSection icon={<GitBranch className="size-4" />} title="供应线路">
-                                <RouteFields channelModels={modelChannelModels} channelNames={channelNames} channelEnabled={channelEnabled} form={modelForm} capability={modelCapability} />
-                            </EditorSection>
-                            <EditorSection title="系统规格价格"><PricingFields /></EditorSection>
-                        </>,
+                        children: (
+                            <>
+                                <EditorSection icon={<GitBranch className="size-4" />} title="供应线路">
+                                    <RouteFields channelModels={modelChannelModels} channelNames={channelNames} channelEnabled={channelEnabled} form={modelForm} capability={modelCapability} />
+                                </EditorSection>
+                                <EditorSection title="系统规格价格">
+                                    <PricingFields />
+                                </EditorSection>
+                            </>
+                        ),
                     },
                     {
                         key: "capabilities",
                         label: "能力与参数",
-                        children: <>
-                            <EditorSection title="创作端可选能力">
-                                <Form.Item name="capabilitySpec" noStyle>
-                                    <CapabilityScopeEditor capability={modelCapability} sourceSpecs={modelSourceSpecs} mode="front" />
-                                </Form.Item>
-                            </EditorSection>
-                            <EditorSection title="默认参数">
-                                <Form.Item name="defaultOptions" noStyle>
-                                    <DefaultOptionsEditor spec={modelCapabilitySpec} />
-                                </Form.Item>
-                            </EditorSection>
-                        </>,
+                        children: (
+                            <>
+                                <EditorSection title="创作端可选能力">
+                                    <Form.Item name="capabilitySpec" noStyle>
+                                        <CapabilityScopeEditor capability={modelCapability} sourceSpecs={modelSourceSpecs} mode="front" />
+                                    </Form.Item>
+                                </EditorSection>
+                                <EditorSection title="默认参数">
+                                    <Form.Item name="defaultOptions" noStyle>
+                                        <DefaultOptionsEditor spec={modelCapabilitySpec} />
+                                    </Form.Item>
+                                </EditorSection>
+                            </>
+                        ),
                     },
                 ]}
             >
@@ -459,7 +481,9 @@ export default function LogicalModelsPage() {
                             modelForm.setFieldsValue({ routes: [], capabilitySpec: emptyCapabilitySpec(changedValues.capability), defaultOptions: {}, pricePolicy: "channel", billingMode: "fixed_request" });
                         }}
                     >
-                        <Form.Item name="enabled" hidden><Switch /></Form.Item>
+                        <Form.Item name="enabled" hidden>
+                            <Switch />
+                        </Form.Item>
                         {tabs}
                     </Form>
                 )}

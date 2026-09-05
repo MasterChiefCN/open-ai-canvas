@@ -27,14 +27,7 @@ export function ModelEditorModal({
     admin?: boolean;
     children?: ReactNode | ((tabs: ReactNode) => ReactNode);
 }) {
-    const tabs = items?.length ? (
-        <Tabs
-            activeKey={activeKey}
-            onChange={onTabChange}
-            animated={false}
-            items={items.map((item) => ({ ...item, forceRender: true, children: <div className="model-editor-panel">{item.children}</div> }))}
-        />
-    ) : null;
+    const tabs = items?.length ? <Tabs activeKey={activeKey} onChange={onTabChange} animated={false} items={items.map((item) => ({ ...item, forceRender: true, children: <div className="model-editor-panel">{item.children}</div> }))} /> : null;
     const content = typeof children === "function" ? children(tabs) : children || tabs;
 
     return (

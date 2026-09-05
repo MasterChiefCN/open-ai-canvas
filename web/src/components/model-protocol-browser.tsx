@@ -1,7 +1,11 @@
 import { ChoiceBrowser } from "./choice-browser";
 import type { ModelProtocolDefinition, ProtocolCapability } from "@/lib/model-protocols";
 
-export function ModelProtocolBrowser({ capability, protocols, ...props }: {
+export function ModelProtocolBrowser({
+    capability,
+    protocols,
+    ...props
+}: {
     capability?: ProtocolCapability;
     protocols: ModelProtocolDefinition[];
     value?: string;

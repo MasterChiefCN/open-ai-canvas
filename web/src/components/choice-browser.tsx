@@ -42,24 +42,12 @@ export function ChoiceBrowser({
     const [query, setQuery] = useState("");
     const selected = options.find((option) => option.value === value);
     const normalizedQuery = query.trim().toLowerCase();
-    const visible = options.filter((option) =>
-        [option.label, option.subtitle, option.vendor, option.searchText].join(" ").toLowerCase().includes(normalizedQuery),
-    );
+    const visible = options.filter((option) => [option.label, option.subtitle, option.vendor, option.searchText].join(" ").toLowerCase().includes(normalizedQuery));
     const unavailable = disabled || loading || Boolean(error);
 
     return (
         <div className="choice-browser">
-            <Input
-                id={id}
-                {...aria}
-                allowClear
-                aria-label={`搜索${label}`}
-                disabled={unavailable}
-                prefix={<Search className="size-3.5" aria-hidden="true" />}
-                placeholder={placeholder}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-            />
+            <Input id={id} {...aria} allowClear aria-label={`搜索${label}`} disabled={unavailable} prefix={<Search className="size-3.5" aria-hidden="true" />} placeholder={placeholder} value={query} onChange={(event) => setQuery(event.target.value)} />
             {loading || error || !options.length ? (
                 <div className="choice-browser-state" role={error ? "alert" : "status"}>
                     {loading ? "正在读取可选项…" : error || "暂无可用选项"}
@@ -76,14 +64,7 @@ export function ChoiceBrowser({
                                 <span className="choice-browser-vendor" title={option.vendor}>
                                     {option.vendor}
                                 </span>
-                                <input
-                                    type="radio"
-                                    name={name}
-                                    value={option.value}
-                                    checked={option.value === value}
-                                    disabled={unavailable || option.disabled}
-                                    onChange={() => onChange?.(option.value)}
-                                />
+                                <input type="radio" name={name} value={option.value} checked={option.value === value} disabled={unavailable || option.disabled} onChange={() => onChange?.(option.value)} />
                             </label>
                         ))}
                         {!visible.length && (
