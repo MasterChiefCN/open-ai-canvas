@@ -9,6 +9,7 @@ import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { modelQuoteRequest } from "@/lib/model-pricing";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
+import { buildImageResolutionOptions, imageResolutionOption } from "@/lib/image-resolution-tiers";
 import { modelRequestOptions, resolveCompatibleModel, resolveModelGenerationDefaults, defaultImageParamsForModel, type ModelRequirements } from "@/lib/model-selection";
 import { navigateToSettings } from "@/lib/settings-navigation";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -107,6 +108,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         }, mode),
     };
     const config = buildNodeConfig(globalConfig, node, mode, requirements);
+    const resolvedRequirements: ModelRequirements = {
+        ...requirements,
+        options: modelRequestOptions(config, mode),
+        videoSeconds: mode === "video" ? config.videoSeconds : undefined,
+    };
     const promptOptimizerProvider = useMemo(() => {
         if (!promptOptimizerEnabled || !promptOptimizerInstallation || !promptOptimizerPlugin.createPromptOptimizer) return null;
         return promptOptimizerPlugin.createPromptOptimizer(createPluginHostContext(promptOptimizerPlugin, promptOptimizerInstallation, globalConfig));
@@ -121,9 +127,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         seconds: mode === "video" ? config.videoSeconds : 1,
         capability: mode,
         config,
-        requirements,
+        requirements: resolvedRequirements,
     });
-    const quoteRequest = modelQuoteRequest(config, config.model, mode, requirements);
+    const quoteRequest = modelQuoteRequest(config, config.model, mode, resolvedRequirements);
     const quoteRequestKey = JSON.stringify(quoteRequest || null);
     const [quotedCredits, setQuotedCredits] = useState<number | null>(null);
     const credits = quotedCredits ?? configuredCredits;
@@ -345,7 +351,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         value={config.model}
                         onChange={(model) => onConfigChange(node.id, mode === "image" ? { model, ...defaultImageParamsForModel(config, model) } : { model })}
                         capability={mode}
-                        requirements={requirements}
+                        requirements={resolvedRequirements}
                         onMissingConfig={() => navigateToSettings({ continueCreation: true })}
                         showSelectedPrice={false}
                         variant="creation"
@@ -734,10 +740,11 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
             videoWatermark: globalConfig.videoWatermark || defaultConfig.videoWatermark,
         },
     );
+    const imageQuality = mode === "image" ? resolvePricedImageQuality({ ...globalConfig, size: defaults.size ?? globalConfig.size ?? defaultConfig.size }, model, defaults.quality || globalConfig.quality || defaultConfig.quality) : undefined;
     return {
         ...globalConfig,
         model,
-        quality: defaults.quality || globalConfig.quality || defaultConfig.quality,
+        quality: imageQuality || defaults.quality || globalConfig.quality || defaultConfig.quality,
         size: defaults.size ?? globalConfig.size ?? defaultConfig.size,
         transparentBackground: defaults.transparentBackground || "false",
         videoSeconds: defaults.videoSeconds || normalizeVideoDuration(globalConfig.videoSeconds || defaultConfig.videoSeconds),
@@ -750,6 +757,19 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
         count: defaults.count || String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
     };
+}
+
+export function resolvePricedImageQuality(config: AiConfig, model: string, quality: string) {
+    if (quality && quality !== "auto") return quality;
+    const channel = resolveModelChannel(config, model);
+    const sizeTier = imageResolutionOption(buildImageResolutionOptions([config.size]), config.size)?.tier;
+    if (sizeTier) return sizeTier;
+    const cost = channel.modelCosts?.find((item) => item.model === modelOptionName(model));
+    const tier = cost?.logicalPriceTiers?.find((item) => {
+        const value = item.selector?.quality || "";
+        return value && value !== "*";
+    });
+    return tier?.selector?.quality || quality;
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {

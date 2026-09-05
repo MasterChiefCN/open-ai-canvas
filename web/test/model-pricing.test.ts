@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { modelQuoteRequest, normalizeTierResolution, priceTierSummaryLabel, priceTiersForCurrentSelection, requestCreditCost } from "../src/lib/model-pricing";
 import type { ModelRequirements } from "../src/lib/model-selection";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, resolveModelChannel, type AiConfig } from "../src/stores/use-config-store";
+import { resolvePricedImageQuality } from "../src/components/canvas/canvas-node-prompt-panel";
 
 function systemConfig(input: { capability?: "image" | "video"; logicalModelId?: string; tiers: Array<{ selector: Record<string, string>; billingMode: "fixed_request" | "per_second" | "token"; unitPriceMicrocredits: number }> }) {
     const capability = input.capability || "video";
@@ -58,6 +59,78 @@ const textVideoRequirements: ModelRequirements = {
 };
 
 describe("model request pricing", () => {
+    test("resolves automatic image quality to the first configured specification", () => {
+        const config = systemConfig({
+            capability: "image",
+            tiers: [
+                { selector: { quality: "1k" }, billingMode: "fixed_request", unitPriceMicrocredits: 1_000_000 },
+                { selector: { quality: "2k" }, billingMode: "fixed_request", unitPriceMicrocredits: 2_000_000 },
+                { selector: { quality: "4k" }, billingMode: "fixed_request", unitPriceMicrocredits: 4_000_000 },
+            ],
+        });
+        expect(resolvePricedImageQuality(config, config.model, "auto")).toBe("1k");
+        expect(resolvePricedImageQuality(config, config.model, "2k")).toBe("2k");
+    });
+
+    test("uses image dimensions to match resolution pricing when quality is automatic", () => {
+        const config = systemConfig({
+            capability: "image",
+            tiers: [
+                { selector: { quality: "1k" }, billingMode: "fixed_request", unitPriceMicrocredits: 2_000_000 },
+                { selector: { quality: "2k" }, billingMode: "fixed_request", unitPriceMicrocredits: 3_000_000 },
+                { selector: { quality: "4k" }, billingMode: "fixed_request", unitPriceMicrocredits: 5_000_000 },
+            ],
+        });
+        for (const [size, price] of [["1024x1024", 2], ["2048x2048", 3], ["2880x2880", 5]] as const) {
+            expect(requestCreditCost({ channelMode: "remote", modelCosts: resolveModelChannel(config, config.model).modelCosts, model: "image-model", capability: "image", config: { ...config, quality: "auto", size }, requirements: { capability: "image", options: { quality: "auto", size } }, count: 1 })).toBe(price);
+        }
+    });
+
+    test("matches each image resolution and generation operation for quotes and displayed costs", () => {
+        const qualities = ["1k", "2k", "4k"];
+        const config = systemConfig({
+            capability: "image",
+            logicalModelId: "logical-image",
+            tiers: ["text_to_image", "image_to_image"].flatMap((operation, operationIndex) =>
+                qualities.map((quality, index) => ({
+                    selector: { operation, quality },
+                    billingMode: "fixed_request" as const,
+                    unitPriceMicrocredits: (index + 1 + operationIndex * 3) * 1_000_000,
+                })),
+            ),
+        });
+        const channel = resolveModelChannel(config, config.model);
+        for (const imageCount of [0, 1]) {
+            for (const [index, quality] of qualities.entries()) {
+                const requirements: ModelRequirements = {
+                    capability: "image",
+                    input: { textCount: 1, imageCount, characterCount: 0, videoCount: 0, audioCount: 0 },
+                    options: { quality: quality.toUpperCase(), size: "16:9" },
+                };
+                expect(requestCreditCost({ channelMode: "remote", modelCosts: channel.modelCosts, model: "image-model", capability: "image", config, requirements, count: 1 })).toBe(index + 1 + imageCount * 3);
+                expect(modelQuoteRequest(config, config.model, "image", requirements)?.intent).toMatchObject({
+                    operation: imageCount ? "image_to_image" : "text_to_image",
+                    inputs: { image: imageCount },
+                    options: { quality: quality.toUpperCase() },
+                });
+            }
+        }
+        const characterRequirements: ModelRequirements = { capability: "image", input: { textCount: 1, imageCount: 0, characterCount: 1, videoCount: 0, audioCount: 0 }, options: { quality: "2k" } };
+        expect(modelQuoteRequest(config, config.model, "image", characterRequirements)?.intent).toMatchObject({ operation: "image_to_image", inputs: { image: 1 } });
+        expect(requestCreditCost({ channelMode: "remote", modelCosts: channel.modelCosts, model: "image-model", capability: "image", config, requirements: characterRequirements, count: 1 })).toBe(5);
+        expect(priceTiersForCurrentSelection(channel.modelCosts![0]!.logicalPriceTiers!, "image", { ...config, quality: "8k" })).toHaveLength(0);
+    });
+
+    test("prefers a matching image specification over the uniform fallback", () => {
+        const config = systemConfig({ capability: "image", tiers: [
+            { selector: {}, billingMode: "fixed_request", unitPriceMicrocredits: 1_000_000 },
+            { selector: { operation: "text_to_image", quality: "2k" }, billingMode: "fixed_request", unitPriceMicrocredits: 2_000_000 },
+        ] });
+        const tiers = resolveModelChannel(config, config.model).modelCosts![0]!.logicalPriceTiers!;
+        expect(priceTiersForCurrentSelection(tiers, "image", { ...config, quality: "2k" })[0]?.unitPriceMicrocredits).toBe(2_000_000);
+        expect(priceTiersForCurrentSelection(tiers, "image", { ...config, quality: "4k" })[0]?.unitPriceMicrocredits).toBe(1_000_000);
+    });
+
     test("preserves provider-specific resolution enums when matching price tiers", () => {
         expect(normalizeTierResolution("768P竖")).toBe("768p竖");
         expect(normalizeTierResolution("HD_Portrait")).toBe("hd_portrait");

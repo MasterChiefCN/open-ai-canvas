@@ -1,10 +1,42 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 
 	"infinite-canvas/backend/internal/model"
 )
+
+func TestImagePriceTiersMatchResolutionAndActualReferences(t *testing.T) {
+	channelModel := model.ChannelModel{}
+	for _, operation := range []string{"text_to_image", "image_to_image"} {
+		for _, quality := range []string{"1k", "2k", "4k"} {
+			channelModel.PriceTiers = append(channelModel.PriceTiers, model.ChannelModelPriceTier{
+				ID: operation + "-" + quality, SelectorJSON: fmt.Sprintf(`{"operation":%q,"quality":%q}`, operation, quality), Enabled: true, PriceConfigured: true,
+			})
+		}
+	}
+	for _, operation := range []string{"", "image", "text_to_image", "image_to_image"} {
+		for _, quality := range []string{"1K", "2K", "4K"} {
+			for _, imageCount := range []int{0, 1, 3} {
+				intent := ModelRequestIntentFromTaskInput(map[string]any{
+					"mode": "image", "referenceImages": make([]any, imageCount), "config": map[string]any{"quality": quality},
+				}, "canvas_image", operation)
+				wantOperation := "text_to_image"
+				if imageCount > 0 {
+					wantOperation = "image_to_image"
+				}
+				tier := channelModelPriceTierForIntent(channelModel, intent)
+				if tier == nil || tier.ID != wantOperation+"-"+skuSelectorForIntent(intent)["quality"] {
+					t.Fatalf("operation=%q quality=%q imageCount=%d: tier=%#v", operation, quality, imageCount, tier)
+				}
+			}
+		}
+	}
+	if tier := channelModelPriceTierForIntent(channelModel, ModelRequestIntent{Capability: "image", Options: map[string]any{"quality": "8k"}}); tier != nil {
+		t.Fatalf("unconfigured resolution matched tier: %#v", tier)
+	}
+}
 
 func TestModelRequestIntentNormalizesVideoResolution(t *testing.T) {
 	input := map[string]any{
@@ -14,6 +46,36 @@ func TestModelRequestIntentNormalizesVideoResolution(t *testing.T) {
 	intent := ModelRequestIntentFromTaskInput(input, "video_generate", "text_to_video")
 	if got := intent.Options["vquality"]; got != "480p" {
 		t.Fatalf("vquality = %#v, want 480p", got)
+	}
+}
+
+func TestModelRequestIntentNormalizesImageSpecificationValues(t *testing.T) {
+	input := map[string]any{
+		"mode":   "image",
+		"config": map[string]any{"quality": "1K", "size": "3:2"},
+	}
+	intent := ModelRequestIntentFromTaskInput(input, "canvas_image", "image")
+	if got := intent.Options["quality"]; got != "1k" {
+		t.Fatalf("quality = %#v, want 1k", got)
+	}
+	if got := intent.Options["size"]; got != "3:2" {
+		t.Fatalf("size = %#v, want 3:2", got)
+	}
+}
+
+func TestSKUSelectorInfersImageResolutionFromSizeWhenQualityIsAutomatic(t *testing.T) {
+	for _, test := range []struct {
+		size string
+		want string
+	}{
+		{size: "1024x1024", want: "1k"},
+		{size: "2048x2048", want: "2k"},
+		{size: "2880x2880", want: "4k"},
+	} {
+		selector := skuSelectorForIntent(ModelRequestIntent{Capability: "image", Options: map[string]any{"quality": "auto", "size": test.size}})
+		if selector["quality"] != test.want {
+			t.Fatalf("size %s quality = %q, want %q", test.size, selector["quality"], test.want)
+		}
 	}
 }
 

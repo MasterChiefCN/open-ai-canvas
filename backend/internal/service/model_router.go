@@ -85,7 +85,14 @@ func ModelRequestIntentFromTaskInput(input map[string]any, taskType string, oper
 }
 
 func normalizeModelRequestOption(name string, value any) any {
-	if canonicalCapabilityOptionName(name) != "vquality" {
+	canonicalName := canonicalCapabilityOptionName(name)
+	if canonicalName == "quality" || canonicalName == "size" {
+		if text, ok := value.(string); ok {
+			return strings.ToLower(strings.TrimSpace(text))
+		}
+		return value
+	}
+	if canonicalName != "vquality" {
 		return value
 	}
 	resolution, ok := value.(string)
@@ -702,13 +709,51 @@ func skuSelectorForIntent(intent ModelRequestIntent) map[string]string {
 			selector["videoSeconds"] = strconv.Itoa(seconds)
 		}
 	case "image":
+		if intent.Inputs["image"] > 0 {
+			selector["operation"] = "image_to_image"
+		} else {
+			selector["operation"] = "text_to_image"
+		}
+		if quality := normalizeImagePriceQuality(fmt.Sprint(intent.Options["quality"]), fmt.Sprint(intent.Options["size"])); quality != "" {
+			selector["quality"] = quality
+		}
 		for _, key := range []string{"quality", "size"} {
+			if key == "quality" && selector["quality"] != "" {
+				continue
+			}
 			if value := strings.ToLower(strings.TrimSpace(fmt.Sprint(intent.Options[key]))); value != "" && value != "auto" && value != "any" {
 				selector[key] = value
 			}
 		}
 	}
 	return selector
+}
+
+func normalizeImagePriceQuality(rawQuality string, rawSize string) string {
+	quality := strings.ToLower(strings.TrimSpace(rawQuality))
+	if quality != "" && quality != "auto" && quality != "any" {
+		return quality
+	}
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(rawSize)), "x")
+	if len(parts) != 2 {
+		return ""
+	}
+	width, widthErr := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	height, heightErr := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 || width > (1<<32)/height {
+		return ""
+	}
+	pixels := width * height
+	switch {
+	case pixels <= 2_000_000:
+		return "1k"
+	case pixels <= 4_300_000:
+		return "2k"
+	case pixels <= 8_294_400:
+		return "4k"
+	default:
+		return ""
+	}
 }
 
 func skuSelectorForTier(tier model.ChannelModelPriceTier) map[string]string {

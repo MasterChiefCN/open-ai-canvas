@@ -5,6 +5,13 @@ description: 当前项目已实现功能的手工验证清单与未确认边界
 
 # 待测试
 
+## 图片规格价格
+
+- [ ] 仅配置 1K、2K、4K 三档价格（无统一兜底），画布逐一切换分辨率，显示与对应档位一致的积分价格。
+- [ ] 分别配置文生图、图生图规格价格；添加、移除参考图或角色参考后，报价与实际生成命中对应档位。
+- [ ] 新建图片节点时，报价使用节点模型默认规格，而不是全局旧参数；刷新后再次核对。
+- [ ] 配置统一价格时仍正常兜底；未配置且没有兜底的规格不能被计为其他档位价格。
+
 ## 编辑器（M2 命令状态机）
 
 - [x] 命令协议黄金文件：`editor-commands` 8 个黄金 op（addClip/moveClip/trimClip/splitClip/removeClip/setClipProperty/addSubtitle/removeSubtitle）全量快照比对通过；未知 op、非法 payload 一律抛错（fail-closed）且输入不可变。
