@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Compass, Copy, Globe, HelpCircle, Image as ImageIcon, Info, Plus, Search, Sparkles, Type, X } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Button, Input, Switch } from "antd";
+import { Check, Compass, Copy, Globe, Image as ImageIcon, Info, Plus, Search, Sparkles, X } from "lucide-react";
 
 import { AppModal } from "@/components/ui/product/app-modal";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -53,7 +54,6 @@ function buildPanoramaPrompt(sourceMode: PanoramaSourceMode, projection: Panoram
         "除非用户另有说明，保持真实摄影质感、电影级光影和自然空间纵深",
     ].join(", ");
 
-    const projectionLabel = projection === "spherical" ? "720度球形" : "360度环绕";
     const ratio = projection === "spherical" ? "2:1" : "4:1";
 
     const fallbackText = `生成一张可用于全景查看器的完整沉浸式全景图，画面必须是比例${ratio}的等距柱状投影结构，宽度是高度的${projection === "spherical" ? "2倍" : "4倍"}，结合导入图片的主体、材质、色彩和风格，并根据文字描述补全四周环境、天空或天花板、地面或地板，让左右边缘自然衔接。${common}`;
@@ -68,6 +68,7 @@ function buildPanoramaPrompt(sourceMode: PanoramaSourceMode, projection: Panoram
 const PanoramaSetupForm = memo(
     ({
         onSubmit,
+        onCancel,
         onCopyPrompt,
         previewImageUrl,
         initialProjection = "spherical",
@@ -76,6 +77,7 @@ const PanoramaSetupForm = memo(
         canvasNodes,
     }: {
         onSubmit: (composedPrompt: string, config: PanoramaGenerateConfig) => void;
+        onCancel: () => void;
         onCopyPrompt?: (prompt: string) => void;
         previewImageUrl?: string | null;
         initialProjection?: PanoramaProjection;
@@ -87,11 +89,12 @@ const PanoramaSetupForm = memo(
         const [sourceMode, setSourceMode] = useState<PanoramaSourceMode>(normalizeInitialSourceMode(initialSourceMode, Boolean(previewImageUrl)));
         const [smartBase, setSmartBase] = useState(initialSmartBase);
         const [prompt, setPrompt] = useState("");
-        const [showSmartHelp, setShowSmartHelp] = useState(false);
         const [assetQuery, setAssetQuery] = useState("");
         const [isAssetPickerOpen, setIsAssetPickerOpen] = useState(false);
         const [selectedIds, setSelectedIds] = useState<string[]>([]);
         const [draftSelectedIds, setDraftSelectedIds] = useState<string[]>([]);
+        const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
+        const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
         const canvasReferences = useMemo<PanoramaReferenceImage[]>(() => {
             const list: PanoramaReferenceImage[] = [];
@@ -158,6 +161,8 @@ const PanoramaSetupForm = memo(
         const effectivePrompt = sourceMode === "image" ? prompt.trim() : prompt.trim() || defaultAiPrompt;
         const composed = sourceMode === "image" ? effectivePrompt : buildPanoramaPrompt(sourceMode, projection, effectivePrompt);
         const directReference = selectedReferences[0] ?? null;
+        const outputRatio = projection === "spherical" ? "2:1" : "4:1";
+        const canSubmit = sourceMode === "ai" || Boolean(directReference);
 
         const handleSubmit = useCallback(() => {
             if (sourceMode === "image" && !directReference) return;
@@ -169,6 +174,32 @@ const PanoramaSetupForm = memo(
                 directImageUrl: sourceMode === "image" ? (directReference?.url ?? null) : null,
             });
         }, [composed, directReference, onSubmit, projection, selectedReferences, smartBase, sourceMode]);
+
+        useEffect(() => {
+            const onKeyDown = (event: KeyboardEvent) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                    event.preventDefault();
+                    handleSubmit();
+                }
+            };
+            window.addEventListener("keydown", onKeyDown);
+            return () => window.removeEventListener("keydown", onKeyDown);
+        }, [handleSubmit]);
+
+        const markImageLoaded = useCallback((id: string) => {
+            setLoadedImages((current) => (current[id] ? current : { ...current, [id]: true }));
+        }, []);
+
+        const markImageFailed = useCallback((id: string) => {
+            setFailedImages((current) => (current[id] ? current : { ...current, [id]: true }));
+        }, []);
+
+        const trackImageReady = useCallback(
+            (id: string) => (element: HTMLImageElement | null) => {
+                if (element?.complete && element.naturalWidth > 0) markImageLoaded(id);
+            },
+            [markImageLoaded],
+        );
 
         const toggleDraftReference = (id: string) => {
             setDraftSelectedIds((current) => {
@@ -189,279 +220,276 @@ const PanoramaSetupForm = memo(
             setIsAssetPickerOpen(false);
         };
 
-        const projectionButtons = (
-            <div className="grid grid-cols-2 gap-2">
+        const renderImageSurface = (image: PanoramaReferenceImage, surfaceClass: string) => {
+            const loaded = loadedImages[image.id];
+            const failed = failedImages[image.id];
+            return (
+                <div className={`relative overflow-hidden bg-foreground/5 ${surfaceClass}`}>
+                    <img
+                        src={image.url}
+                        alt={image.label}
+                        draggable={false}
+                        ref={trackImageReady(image.id)}
+                        onLoad={() => markImageLoaded(image.id)}
+                        onError={() => markImageFailed(image.id)}
+                        className={`h-full w-full object-cover transition-opacity duration-300 ${loaded && !failed ? "opacity-100" : "opacity-0"}`}
+                    />
+                    {!failed && !loaded && <div className="absolute inset-0 animate-pulse bg-foreground/5" />}
+                    {failed && (
+                        <div className="absolute inset-0 grid place-items-center">
+                            <span className="px-2 text-center text-[11px] leading-4 text-foreground/40">加载失败</span>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const thumbSizeClass = sourceMode === "image" ? "w-[140px]" : "w-[100px]";
+
+        const selectedThumb = (image: PanoramaReferenceImage, index: number) => (
+            <div key={image.id} className={`group relative shrink-0 ${thumbSizeClass}`}>
+                {renderImageSurface(image, "aspect-[4/3] rounded-[var(--r-md)]")}
+                <span className="pointer-events-none absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-black/55 px-1.5 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm">
+                    <span className="size-1 rounded-full" style={{ backgroundColor: image.color }} />
+                    {sourceMode === "image" ? "源图" : `${index + 1}`}
+                </span>
                 <button
                     type="button"
-                    onClick={() => setProjection("spherical")}
-                    className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs transition ${projection === "spherical" ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-white" : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:bg-[var(--color-bg-hover)]"}`}
+                    onClick={() => setSelectedIds((current) => current.filter((id) => id !== image.id))}
+                    aria-label={`移除${image.label}`}
+                    className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                 >
-                    <Globe className="h-3 w-3" /> 720°球体
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setProjection("cylindrical")}
-                    className={`flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs transition ${projection === "cylindrical" ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-white" : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:bg-[var(--color-bg-hover)]"}`}
-                >
-                    <Compass className="h-3 w-3" /> 360°环绕
+                    <X className="size-3" />
                 </button>
             </div>
         );
 
-        const modeButtons = (
-            <div className="grid grid-cols-2 gap-2">
-                <button
-                    type="button"
-                    onClick={() => setSourceMode("ai")}
-                    className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs transition ${sourceMode !== "image" ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-white" : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:bg-[var(--color-bg-hover)]"}`}
-                >
-                    <Type className="h-3 w-3" /> AI生成全景图
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setSourceMode("image")}
-                    className={`flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-xs transition ${sourceMode === "image" ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-white" : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:bg-[var(--color-bg-hover)]"}`}
-                >
-                    <ImageIcon className="h-3 w-3" /> 图生全景图
-                </button>
-            </div>
-        );
-
-        const smartControl = (
-            <div className="relative flex items-center gap-1.5">
-                <button
-                    type="button"
-                    onClick={() => setSmartBase((current) => !current)}
-                    className={`inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border px-2.5 text-xs transition-colors ${
-                        smartBase ? "border-[var(--color-accent)]/60 bg-[var(--color-accent)]/15 text-[var(--color-accent)]" : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-                    }`}
-                >
-                    {smartBase && <CheckCircle2 className="h-3 w-3" />}
-                    智能比例合成
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setShowSmartHelp((current) => !current)}
-                    className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text)]"
-                >
-                    <HelpCircle className="h-3.5 w-3.5" />
-                </button>
-                {showSmartHelp && (
-                    <div className="absolute bottom-full right-0 z-30 mb-2 w-[340px] rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-[11px] leading-5 text-[var(--color-text-muted)] shadow-2xl">
-                        AI生成全景图会优先提交目标比例；如果供应商没有 2:1 / 4:1，会选择最接近的宽比例生成，再裁切、羽化并归一化。
-                    </div>
-                )}
-            </div>
-        );
-
-        const body = (
-            <div className="grid min-h-[560px] grid-cols-[270px_minmax(0,1fr)_330px]">
-                <aside className="flex flex-col border-r border-[var(--color-border)] bg-[var(--color-bg-subtle)]">
-                    <div className="border-b border-[var(--color-border)] px-3 py-2">
-                        <div className="text-xs font-semibold text-[var(--color-text)]">{sourceMode === "image" ? "全景源图（单张）" : "全景素材"}</div>
-                        <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
-                            {sourceMode === "image" ? (selectedReferences.length > 0 ? "已选 1 张源图" : "请选择 1 张源图") : `${selectedReferences.length} / ${allReferences.length} 张已加入`}
-                        </div>
-                    </div>
-                    <div className="ui-scrollbar nowheel flex-1 overflow-y-auto p-2">
-                        <div className="space-y-2">
-                            {selectedReferences.map((image, index) => (
-                                <div key={image.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-1.5">
-                                    <div className="aspect-video overflow-hidden rounded bg-[var(--color-bg-subtle)]">
-                                        <img src={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
-                                    </div>
-                                    <div className="mt-1 flex items-center gap-1">
-                                        <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: image.color }} />
-                                        <div className="min-w-0 flex-1 truncate text-[10px] text-[var(--color-text)]">
-                                            {sourceMode === "image" ? "源图" : `图${index + 1}`} · {image.label}
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSelectedIds((current) => current.filter((id) => id !== image.id))}
-                                            className="rounded px-1 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text)]"
-                                        >
-                                            ×
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                            {(sourceMode !== "image" || selectedReferences.length === 0) && (
-                                <button
-                                    type="button"
-                                    onClick={openAssetPicker}
-                                    className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-subtle)] text-[var(--color-text-muted)] hover:border-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                                    title={sourceMode === "image" ? "选择全景源图" : "从资产加入图片"}
-                                >
-                                    <Plus className="h-6 w-6" />
-                                </button>
-                            )}
-                            {sourceMode === "image" && selectedReferences.length > 0 && (
-                                <button
-                                    type="button"
-                                    onClick={openAssetPicker}
-                                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-2 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-                                    title="替换源图"
-                                >
-                                    替换源图
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </aside>
-
-                <main className="flex min-w-0 flex-col gap-4 p-6">
-                    <div className="relative">
-                        <textarea
-                            value={prompt}
-                            onChange={(event) => setPrompt(event.target.value)}
-                            placeholder={sourceMode === "image" ? "可选备注：使用现成图片作为全景源，不会提交给 AI" : "输入全景场景描述；文字+图片+内置全景提示词会一起提交"}
-                            className="nodrag nowheel h-40 w-full resize-none rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-4 py-3 text-sm leading-6 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)]/70 focus:border-[var(--color-accent)]"
-                        />
-                    </div>
-                    {sourceMode === "ai" ? (
-                        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
-                            AI生成全景图会把文字、导入图片和内置全景提示词一起提交，目标是先得到 2:1 全景底图，再进入全景查看器。
-                        </div>
-                    ) : (
-                        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
-                            图生全景图只使用第一张源图作为全景底图。图片接近 {projection === "spherical" ? "2:1" : "4:1"} 时直接进入全景查看器；不符合时在本地裁切、羽化并归一化，不会提交给 AI。
-                        </div>
-                    )}
-                    {sourceMode !== "image" && (
-                        <details className="text-[11px] text-[var(--color-text-muted)]">
-                            <summary className="cursor-pointer hover:text-[var(--color-text)]">查看最终提示词</summary>
-                            <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[var(--color-bg-subtle)] p-2 text-[11px] text-[var(--color-text-muted)]">{composed}</pre>
-                        </details>
-                    )}
-                    <div className="mt-auto flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-4">
-                        {sourceMode !== "image" ? (
-                            <div className="text-[11px] leading-5 text-[var(--color-text-muted)]">使用当前配置生成全景图。</div>
-                        ) : (
-                            <div className="text-[11px] leading-5 text-[var(--color-text-muted)]">使用现成图片作为全景源，比例处理在本地完成。</div>
-                        )}
-                        <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={handleSubmit}
-                                disabled={sourceMode === "image" && !directReference}
-                                className="flex h-8 items-center gap-1 whitespace-nowrap rounded-md bg-[var(--color-accent)] px-3 text-xs text-white hover:bg-[var(--color-accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                                {sourceMode === "image" ? <ImageIcon className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
-                                {sourceMode === "image" ? "创建全景图" : "生成全景图"}
-                            </button>
-                        </div>
-                    </div>
-                </main>
-
-                <aside className="flex flex-col gap-4 border-l border-[var(--color-border)] bg-[var(--color-bg-subtle)] p-4">
-                    <section className="flex flex-col gap-2">
-                        <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">生成方式</div>
-                        {modeButtons}
-                    </section>
-                    <section className="flex flex-col gap-2">
-                        <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">投影方式</div>
-                        {projectionButtons}
-                    </section>
-                    {projection === "cylindrical" && (
-                        <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-5 text-amber-700 dark:text-amber-200/85">360° 环绕更适合横向街景/长廊；普通全景建议使用 720° 球体。</div>
-                    )}
-                    <section className="flex flex-col gap-2">
-                        <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">比例兜底</div>
-                        <div className="flex items-start gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
-                            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
-                            <span>
-                                {sourceMode === "image"
-                                    ? `本地检查源图比例；符合 ${projection === "spherical" ? "2:1" : "4:1"} 时直接使用，不符合时本地裁切、羽化并归一化。`
-                                    : `会优先请求 ${projection === "spherical" ? "2:1" : "4:1"} 全景比例；如果当前供应商不支持，会自动改用最接近的宽比例，并在生成后走裁切/归一化兜底。`}
-                            </span>
-                        </div>
-                        {sourceMode !== "image" && (
-                            <div className="flex flex-col gap-2 pt-1">
-                                {smartControl}
-                                <button
-                                    type="button"
-                                    onClick={() => onCopyPrompt?.(composed)}
-                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-hover)]"
-                                    title="复制完整提示词到剪贴板"
-                                >
-                                    <Copy className="h-3 w-3" /> 复制提示词
-                                </button>
-                            </div>
-                        )}
-                    </section>
-                </aside>
-            </div>
+        const addTile = (
+            <button
+                type="button"
+                onClick={openAssetPicker}
+                className={`flex shrink-0 flex-col items-center justify-center gap-1.5 rounded-[var(--r-md)] bg-foreground/5 text-[10px] font-medium text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground/65 ${thumbSizeClass} aspect-[4/3]`}
+            >
+                <Plus className="size-4" strokeWidth={1.8} />
+                <span>添加</span>
+            </button>
         );
 
         return (
             <>
-                {body}
-                {isAssetPickerOpen && (
-                    <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/35 backdrop-blur-sm">
-                        <div className="w-[560px] max-w-[calc(100%-32px)] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl">
-                            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-                                <div>
-                                    <div className="text-sm font-semibold text-[var(--color-text)]">{sourceMode === "image" ? "选择要转换的全景源图" : "选择全景参考图"}</div>
-                                    <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{sourceMode === "image" ? "图生全景图只使用一张现成图片作为全景源，不会提交给 AI" : "AI生成全景图支持多选，可作为风格 / 主体 / 元素参考"}</div>
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
+                    <header className="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3">
+                        <span className="grid size-7 shrink-0 place-items-center rounded-[var(--r-md)] bg-foreground/5 text-foreground/70">
+                            <Globe className="size-3.5" strokeWidth={1.8} />
+                        </span>
+                        <div className="min-w-0">
+                            <h2 className="text-[13px] font-semibold leading-tight">全景图生成</h2>
+                            <p className="text-[10px] text-foreground/45">AI 补全环境或直接转换</p>
+                        </div>
+                    </header>
+
+                    <main className="ui-scrollbar nowheel min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-3">
+                        <div className="space-y-3">
+                            {/* 生成方式 */}
+                            <div>
+                                <div className="mb-1.5 text-[11px] font-semibold text-foreground">生成方式</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        aria-pressed={sourceMode === "ai"}
+                                        onClick={() => setSourceMode("ai")}
+                                        className={`flex items-center gap-2 rounded-[var(--r-md)] px-2.5 py-2 text-left transition-all ${
+                                            sourceMode === "ai"
+                                                ? "bg-accent text-white"
+                                                : "bg-foreground/5 text-foreground hover:bg-foreground/10"
+                                        }`}
+                                    >
+                                        <Sparkles className="size-4 shrink-0" />
+                                        <div className="min-w-0">
+                                            <div className="text-[11px] font-semibold">AI 生成</div>
+                                            <div className="text-[9px] leading-tight opacity-75">补全环境</div>
+                                        </div>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        aria-pressed={sourceMode === "image"}
+                                        onClick={() => setSourceMode("image")}
+                                        className={`flex items-center gap-2 rounded-[var(--r-md)] px-2.5 py-2 text-left transition-all ${
+                                            sourceMode === "image"
+                                                ? "bg-accent text-white"
+                                                : "bg-foreground/5 text-foreground hover:bg-foreground/10"
+                                        }`}
+                                    >
+                                        <ImageIcon className="size-4 shrink-0" />
+                                        <div className="min-w-0">
+                                            <div className="text-[11px] font-semibold">图片直出</div>
+                                            <div className="text-[9px] leading-tight opacity-75">直接转换</div>
+                                        </div>
+                                    </button>
                                 </div>
-                                <button type="button" onClick={() => setIsAssetPickerOpen(false)} className="rounded-md p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text)]">
-                                    <X className="h-4 w-4" />
+                            </div>
+
+                            {/* 参考图 / 源图 */}
+                            <div>
+                                <div className="mb-1.5 flex items-center justify-between gap-2">
+                                    <div className="text-[11px] font-semibold text-foreground">{sourceMode === "image" ? "全景源图" : "参考图"}</div>
+                                    <Button size="small" type="text" icon={<Plus className="size-3.5" />} onClick={openAssetPicker} className="!h-6 !px-2 !text-[10px]">
+                                        {sourceMode === "image" && selectedReferences.length > 0 ? "替换" : "添加"}
+                                    </Button>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {selectedReferences.map((image, index) => selectedThumb(image, index))}
+                                    {sourceMode !== "image" && addTile}
+                                    {sourceMode === "image" && selectedReferences.length === 0 && addTile}
+                                </div>
+                            </div>
+
+                            {/* 场景描述 */}
+                            {sourceMode === "ai" && (
+                                <div>
+                                    <div className="mb-1.5 text-[11px] font-semibold text-foreground">场景描述</div>
+                                    <Input.TextArea
+                                        value={prompt}
+                                        onChange={(event) => setPrompt(event.target.value)}
+                                        placeholder="例如：黄昏的海边木屋，能看到天空、地面和四周环境"
+                                        autoSize={{ minRows: 2, maxRows: 4 }}
+                                    />
+                                </div>
+                            )}
+
+                            {/* 全景类型 */}
+                            <div>
+                                <div className="mb-1.5 text-[11px] font-semibold text-foreground">全景类型</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {(
+                                        [
+                                            { value: "spherical" as const, icon: Globe, title: "球形全景", desc: "720° 沉浸式", ratio: "2:1" },
+                                            { value: "cylindrical" as const, icon: Compass, title: "环绕全景", desc: "360° 街景", ratio: "4:1" },
+                                        ] as const
+                                    ).map((option) => {
+                                        const selected = projection === option.value;
+                                        const Icon = option.icon;
+                                        return (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                aria-pressed={selected}
+                                                onClick={() => setProjection(option.value)}
+                                                className={`flex items-center gap-2 rounded-[var(--r-md)] px-2.5 py-2 text-left transition-all ${
+                                                    selected
+                                                        ? "bg-accent text-white"
+                                                        : "bg-foreground/5 text-foreground hover:bg-foreground/10"
+                                                }`}
+                                            >
+                                                <Icon className="size-4 shrink-0" />
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-[11px] font-semibold">{option.title}</span>
+                                                        <span className={`rounded-sm px-1 py-px text-[9px] font-medium ${selected ? "bg-white/20" : "bg-foreground/8 text-foreground/55"}`}>{option.ratio}</span>
+                                                    </div>
+                                                    <div className={`text-[9px] leading-tight ${selected ? "opacity-80" : "text-foreground/50"}`}>{option.desc}</div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* 高级选项 */}
+                            <div>
+                                <div className="mb-1.5 text-[11px] font-semibold text-foreground">高级选项</div>
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between gap-3 rounded-[var(--r-md)] bg-foreground/5 px-2.5 py-1.5">
+                                        <div className="min-w-0">
+                                            <div className="text-[11px] font-semibold text-foreground">智能比例</div>
+                                            <div className="text-[9px] leading-tight text-foreground/50">模型不支持时自动裁切</div>
+                                        </div>
+                                        <Switch size="small" checked={smartBase} onChange={setSmartBase} />
+                                    </div>
+                                    {sourceMode === "ai" && (
+                                        <Button size="small" type="text" icon={<Copy className="size-3.5" />} onClick={() => onCopyPrompt?.(composed)} className="!h-6 !px-2 !text-[10px]">
+                                            复制完整提示词
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+
+                    <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-5 py-2.5">
+                        <span className={`truncate text-[10px] ${canSubmit ? "text-foreground/45" : "text-amber-500"}`}>
+                            {sourceMode === "image" ? (directReference ? "已选源图" : "请选择源图") : selectedReferences.length > 0 ? `${selectedReferences.length} 张参考图` : "无参考图"}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-2">
+                            <Button size="small" onClick={onCancel}>
+                                取消
+                            </Button>
+                            <Button size="small" type="primary" icon={sourceMode === "image" ? <ImageIcon className="size-3.5" /> : <Sparkles className="size-3.5" />} disabled={!canSubmit} onClick={handleSubmit}>
+                                {sourceMode === "image" ? "创建全景图" : "生成全景图"}
+                            </Button>
+                        </div>
+                    </footer>
+                </div>
+
+                {/* 选图面板 */}
+                {isAssetPickerOpen && (
+                    <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
+                        <div className="flex max-h-full w-[500px] max-w-full flex-col overflow-hidden rounded-[var(--r-lg)] border border-border bg-background shadow-2xl">
+                            <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-3">
+                                <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-foreground">{sourceMode === "image" ? "选择源图" : "选择参考图"}</div>
+                                    <div className="mt-0.5 text-[11px] text-foreground/45">
+                                        {sourceMode === "image" ? "只选一张作为全景源" : `已选 ${draftSelectedIds.length} 张`}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsAssetPickerOpen(false)}
+                                    aria-label="关闭"
+                                    className="grid size-6 shrink-0 place-items-center rounded-[var(--r-md)] text-foreground/45 transition-colors hover:bg-foreground/5 hover:text-foreground"
+                                >
+                                    <X className="size-4" />
                                 </button>
                             </div>
-                            <div className="border-b border-[var(--color-border)] px-4 py-2">
-                                <label className="flex h-8 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-2">
-                                    <Search className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
-                                    <input
-                                        value={assetQuery}
-                                        onChange={(event) => setAssetQuery(event.target.value)}
-                                        placeholder="搜索图片名称"
-                                        className="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)]/70"
-                                    />
-                                </label>
+                            <div className="border-b border-border px-5 py-2">
+                                <Input size="small" allowClear value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索图片名称" prefix={<Search className="size-3.5 text-foreground/35" />} />
                             </div>
-                            <div className="ui-scrollbar max-h-[380px] overflow-y-auto p-4">
+                            <div className="ui-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
                                 {filteredReferences.length === 0 ? (
-                                    <div className="rounded-lg border border-dashed border-[var(--color-border)] px-4 py-10 text-center text-xs text-[var(--color-text-muted)]">没有匹配的图片资产</div>
+                                    <div className="rounded-[var(--r-md)] bg-foreground/5 px-4 py-8 text-center text-[11px] text-foreground/45">没有匹配的图片</div>
                                 ) : (
-                                    <div className="grid grid-cols-4 gap-2">
+                                    <div className="grid grid-cols-5 gap-2">
                                         {filteredReferences.map((image) => {
                                             const selected = draftSelectedIds.includes(image.id);
+                                            const failed = failedImages[image.id];
+                                            const loaded = loadedImages[image.id];
                                             return (
                                                 <button
                                                     key={image.id}
                                                     type="button"
                                                     onClick={() => toggleDraftReference(image.id)}
-                                                    className={`relative overflow-hidden rounded-lg border bg-[var(--color-bg)] text-left transition-colors ${
-                                                        selected ? "border-[var(--color-accent)]/80 ring-1 ring-[var(--color-accent)]/50" : "border-[var(--color-border)] hover:border-[var(--color-text-muted)]"
-                                                    }`}
+                                                    aria-pressed={selected}
+                                                    className={`group relative overflow-hidden rounded-[var(--r-md)] transition-shadow ${selected ? "ring-2 ring-accent" : ""}`}
                                                 >
-                                                    <div className="aspect-square bg-[var(--color-bg-subtle)]">
-                                                        <img src={image.url} alt={image.label} className="h-full w-full object-cover" draggable={false} />
-                                                    </div>
-                                                    <div className="truncate px-1.5 py-1 text-[10px] text-[var(--color-text)]">{image.label}</div>
-                                                    {selected && <span className="absolute right-1 top-1 rounded bg-[var(--color-accent)] px-1 py-0.5 text-[9px] text-white">已选</span>}
+                                                    {renderImageSurface(image, "aspect-square w-full")}
+                                                    {selected && (
+                                                        <span className="absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full bg-accent text-white">
+                                                            <Check className="size-2.5" />
+                                                        </span>
+                                                    )}
                                                 </button>
                                             );
                                         })}
                                     </div>
                                 )}
                             </div>
-                            <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsAssetPickerOpen(false)}
-                                    className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-                                >
+                            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+                                <Button size="small" onClick={() => setIsAssetPickerOpen(false)}>
                                     取消
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={confirmAssetPicker}
-                                    disabled={sourceMode === "image" && draftSelectedIds.length === 0}
-                                    className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--color-accent)]/90 disabled:cursor-not-allowed disabled:opacity-45"
-                                >
-                                    {sourceMode === "image" ? (draftSelectedIds.length > 0 ? "使用此图" : "请选择一张源图") : `加入 ${draftSelectedIds.length} 张`}
-                                </button>
+                                </Button>
+                                <Button size="small" type="primary" disabled={sourceMode === "image" && draftSelectedIds.length === 0} onClick={confirmAssetPicker}>
+                                    {sourceMode === "image" ? "使用此图" : `加入 ${draftSelectedIds.length}`}
+                                </Button>
                             </div>
                         </div>
                     </div>
@@ -475,11 +503,12 @@ PanoramaSetupForm.displayName = "PanoramaSetupForm";
 
 export function CanvasPanoramaConfigModal({ open, onCancel, onConfirm, onCopyPrompt, previewImageUrl, initialProjection, initialSourceMode, initialSmartBase, nodes }: CanvasPanoramaConfigModalProps) {
     return (
-        <AppModal title="全景图生成" open={open} centered footer={null} width={980} flush onCancel={onCancel}>
-            <div className="flex flex-col">
-                <div className="relative">
+        <AppModal open={open} centered footer={null} width={680} flush onCancel={onCancel}>
+            <div className="flex min-h-0 flex-col overflow-hidden" style={{ maxHeight: "min(640px, calc(100vh - 100px))" }}>
+                <div className="relative flex min-h-0 flex-1">
                     <PanoramaSetupForm
                         onSubmit={onConfirm}
+                        onCancel={onCancel}
                         onCopyPrompt={onCopyPrompt}
                         previewImageUrl={previewImageUrl}
                         initialProjection={initialProjection}
